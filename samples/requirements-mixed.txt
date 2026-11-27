@@ -1,0 +1,6 @@
+# One historical finding, plus declarations requiring manual resolution.
+Jinja2==3.1.2
+idna>=3.0
+packaging
+colorama==0.4.6; sys_platform == "win32"
+-r intentionally-not-read.txt

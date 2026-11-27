@@ -1,0 +1,2 @@
+# This coordinate has no matches in the bundled fixture subset.
+idna==3.20
