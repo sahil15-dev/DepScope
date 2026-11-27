@@ -4,13 +4,15 @@ DepScope is a local dependency advisory scanner for Python requirements and npm 
 
 ![DepScope dashboard showing severity, lookup coverage, and history for labeled offline samples](docs/images/overview.png)
 
-[Grouped findings](docs/images/scan-results.png) · [Remediation center](docs/images/remediation.png) · [Scan comparison](docs/images/scan-comparison.png)
-
 ## Purpose
 
 A manifest can mix exact versions, ranges, and unsupported sources. An empty finding list has different meaning when every version was checked and when some versions could not be assessed. DepScope records that difference alongside each result so a reviewer can judge the evidence before acting on it.
 
 ## Features
+
+Grouped findings, remediation candidates, and scan comparison from bundled offline samples.
+
+[<img src="docs/images/scan-results.png" width="168" alt="Findings grouped by advisory for an offline scan">](docs/images/scan-results.png) [<img src="docs/images/remediation.png" width="168" alt="Remediation candidates with fixed versions and advisory evidence">](docs/images/remediation.png) [<img src="docs/images/scan-comparison.png" width="168" alt="Comparison showing changes in findings between two saved scans">](docs/images/scan-comparison.png)
 
 - Assess exact Python `==` pins and npm lockfile v1–3 entries, including nested npm packages. Keep unresolved declarations visible.
 - Run bundled offline examples or opt in to live lookups from the [Open Source Vulnerabilities database](https://osv.dev/).
