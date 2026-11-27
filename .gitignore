@@ -13,6 +13,7 @@ node_modules/
 .coverage
 .coverage.*
 htmlcov/
+coverage/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
