@@ -5,6 +5,7 @@ from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 
 from ..models import ManifestFormat
+from ..parsers import DEFAULT_PARSE_LIMITS
 from .errors import ServiceError
 
 
@@ -50,3 +51,13 @@ async def read_sample(sample_id: SampleId, limit: int) -> tuple[Sample, bytes]:
     if len(content) > limit:
         raise ServiceError(413, "input_too_large", "The sample exceeds the configured byte limit.")
     return sample, content
+
+
+async def identify_sample(format: ManifestFormat, content: bytes) -> SampleId | None:
+    for identifier, sample in SAMPLES.items():
+        if sample.format != format:
+            continue
+        _, bundled = await read_sample(identifier, DEFAULT_PARSE_LIMITS.max_file_bytes)
+        if bundled == content:
+            return identifier
+    return None

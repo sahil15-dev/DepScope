@@ -1,6 +1,7 @@
 import asyncio
 import math
 import random
+import ssl
 from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -10,6 +11,7 @@ from time import monotonic
 from types import TracebackType
 from typing import Self
 
+import certifi
 import httpx
 
 from ._json import InvalidPayload, array_value, decode_json, object_value
@@ -26,6 +28,12 @@ from .models import (
 )
 
 _API = "https://api.osv.dev"
+
+
+def _tls_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +187,7 @@ class OSVClient:
         self._http = httpx.AsyncClient(
             base_url=_API,
             transport=transport,
+            verify=_tls_context() if transport is None else True,
             timeout=config.request_timeout,
             limits=httpx.Limits(max_connections=config.concurrency),
             trust_env=False,

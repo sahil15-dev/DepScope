@@ -1,15 +1,17 @@
 [build-system]
-requires = ["setuptools>=80,<82"]
+requires = ["setuptools>=84.2.1,<85"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "depscope"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Local dependency advisory scanning and history"
-requires-python = ">=3.12"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "alembic>=1.16,<2",
     "anyio>=4.8,<5",
+    "certifi>=2025.4.26",
     "cvss>=3.6,<4",
     "fastapi>=0.115.12,<1",
     "httpx>=0.28.1,<0.29",
@@ -20,6 +22,9 @@ dependencies = [
     "uvicorn>=0.35,<1",
 ]
 
+[project.scripts]
+depscope = "depscope.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy>=1.15,<2",
@@ -28,9 +33,16 @@ dev = [
     "ruff>=0.11,<1",
 ]
 
+[tool.setuptools.dynamic]
+version = {attr = "depscope.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["backend"]
 include = ["depscope*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"depscope.fixtures" = ["osv.json"]
 
 [tool.ruff]
 target-version = "py312"
@@ -42,7 +54,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["backend/depscope", "backend/tests", "migrations"]
+files = ["backend/depscope", "backend/tests", "migrations", "e2e/fixture_app.py"]
 
 [[tool.mypy.overrides]]
 module = "cvss.*"

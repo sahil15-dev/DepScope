@@ -34,7 +34,7 @@ An occurrence represents one declaration or lockfile entry. Multiple occurrences
 
 Findings use a within-scan advisory representative with references to the full evidence. Equivalence comes from explicit OSV aliases, within the same package coordinate. Representative IDs can change when new aliases appear. Use the stored evidence, alongside the scoring revision, to interpret historical trend points.
 
-## Planned scan comparisons
+## Scan comparisons
 
 Compare within ecosystem and normalized package name, grouping records by overlap in their advisory ID and alias sets. Retain the exact version sets from each scan to show membership and version changes. Show matched groups as unchanged findings even when affected versions differ, with version differences explicit. Show evidence present on one side as newly detected or no longer detected where comparison coverage permits.
 

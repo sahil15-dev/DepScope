@@ -18,6 +18,8 @@ Each input is a finding count after deduplication by package coordinate and advi
 
 `unknown` and `none` contribute zero weight and have separate counts. The index is unavailable when no coordinate completed an assessment or all observed findings have unknown severity. A zero represents zero weighted findings within the scan's coverage. When a partial scan has a numeric index, interpret it in the context of its coverage. Trend views should retain scan provenance and distinguish unavailable values from zero.
 
+Revision 1 reaches its cap at five critical, ten high, or twenty-five medium findings. Mixed severities can also reach the cap. Use severity counts and coverage to distinguish scans with the same capped index. The overview labels the cap and colors the meter by the highest recorded severity. Comparison reports a numeric difference only when both indices are available on the same scoring revision.
+
 ## Recommendation order
 
 1. Present rated findings by descending severity.
@@ -25,3 +27,7 @@ Each input is a finding count after deduplication by package coordinate and advi
 3. Show unknown-severity findings and unresolved dependencies in the manual-review queue. Surface missing or uncertain fix evidence within each finding.
 
 For each item, describe the recorded severity, fix evidence, and next review step. No recommendation rewrites the input manifest.
+
+Remediation groups prioritize highest severity and findings needing fix review. An applicable boundary can become a candidate upgrade. A saved lookup of that candidate's exact version provides independent evidence about its recorded findings at that time. A completed zero-finding lookup is limited to the provider coverage at observation time. Compatibility requires project-specific testing.
+
+CLI policies use advisory severity and require complete coverage. Unknown severity, missing exact assessments, or unresolved inputs make a gated result incomplete. Comparison policies use explicit advisory identities and aliases, with a finding checked when it is newly detected or its recorded severity crosses the threshold. The numerical risk index remains a prioritization aid. [CLI policy behavior](cli.md#exit-codes)

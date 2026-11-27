@@ -1,5 +1,7 @@
 from collections.abc import Iterable
-from pathlib import Path
+from importlib.resources import files
+from importlib.resources.abc import Traversable
+from typing import Self
 
 import httpx
 
@@ -14,7 +16,7 @@ class FixtureProvider:
 
     provenance = Provenance.OFFLINE_FIXTURE
 
-    def __init__(self, fixture: Path) -> None:
+    def __init__(self, fixture: Traversable) -> None:
         try:
             with fixture.open("rb") as file:
                 content = file.read(1_000_001)
@@ -27,6 +29,10 @@ class FixtureProvider:
             raise ScanError(
                 "invalid_fixture", "The bundled OSV fixture could not be loaded."
             ) from exc
+
+    @classmethod
+    def bundled(cls) -> Self:
+        return cls(files("depscope").joinpath("fixtures", "osv.json"))
 
     def _respond(self, request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/v1/querybatch":

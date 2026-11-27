@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,14 +41,17 @@ def migrate(engine: Engine, *, check: bool = False) -> None:
 
 
 @pytest.fixture
-def engine(tmp_path: Path) -> Engine:
+def engine(tmp_path: Path) -> Iterator[Engine]:
     engine = sqlite_engine(tmp_path / "scan.sqlite3")
-    migrate(engine)
-    return engine
+    try:
+        migrate(engine)
+        yield engine
+    finally:
+        engine.dispose()
 
 
 def example_result() -> ScanResult:
-    provider = FixtureProvider(Path("samples/osv.json"))
+    provider = FixtureProvider.bundled()
     return asyncio.run(
         Scanner(provider).scan(b"Jinja2==3.1.2\nalpha>=1", ManifestFormat.REQUIREMENTS)
     )

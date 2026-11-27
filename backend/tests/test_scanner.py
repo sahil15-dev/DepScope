@@ -333,7 +333,7 @@ def test_export_reuses_advisory_data_across_multiple_coordinates() -> None:
 def test_reproducible_bundled_demo(
     filename: str, kind: ManifestFormat, status: LookupStatus, count: int, risk: int
 ) -> None:
-    scanner = Scanner(FixtureProvider(SAMPLES / "osv.json"))
+    scanner = Scanner(FixtureProvider.bundled())
     result = asyncio.run(scanner.scan((SAMPLES / filename).read_bytes(), kind))
     assert (result.provenance, result.status, len(result.findings), result.risk.index) == (
         Provenance.OFFLINE_FIXTURE,
@@ -345,7 +345,7 @@ def test_reproducible_bundled_demo(
 
 
 def test_unknown_offline_coordinate_is_unassessed() -> None:
-    provider = FixtureProvider(SAMPLES / "osv.json")
+    provider = FixtureProvider.bundled()
     result = asyncio.run(Scanner(provider).scan(b"offline-missing==1", ManifestFormat.REQUIREMENTS))
     assert result.status is LookupStatus.FAILED and result.risk.index is None
     assert result.assessments[0].diagnostics == ("fixture_coordinate_unavailable",)

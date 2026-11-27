@@ -1,10 +1,10 @@
 # Architecture and scan flow
 
-The scanner runs independently of HTTP routes, SQLite, and a browser. Its entry point is `Scanner.scan(bytes, format)`. The Phase 2 service exposes a loopback FastAPI boundary and stores scan history in SQLite. The future React client can use a Vite proxy for `/api` during development.
+The scanner runs independently of HTTP routes, SQLite, and a browser. Its entry point is `Scanner.scan(bytes, format)`. The CLI uses the same engine and can optionally save evidence in SQLite. Vite serves the dashboard during development and proxies API requests to `127.0.0.1:8000`. In production, the same FastAPI process serves the built dashboard and API from one origin.
 
 ```mermaid
 flowchart LR
-    UI[Local API client]
+    UI[React dashboard or local API client]
     API[FastAPI and job admission]
     PARSE[Manifest parsing and coverage]
     LOOKUP[Exact-version advisory lookup]
@@ -17,7 +17,7 @@ flowchart LR
     LOOKUP -->|Live coordinates| OSV
     LOOKUP -->|Demo coordinates| FIXTURE
     EVIDENCE -->|Terminal transaction| DB
-    API -->|Read history, findings and summaries| DB
+    API -->|Read history, remediation, comparisons and reports| DB
 ```
 
 ## Boundaries
@@ -37,7 +37,7 @@ flowchart LR
 3. Verify that hydrated advisory evidence covers the coordinate. Preserve discovery-only IDs where details are unavailable or local matching cannot confirm scope. Retain withdrawn advisory observations for inspection and exclude them from active findings. Deduplicate only using explicit aliases on the same coordinate.
 4. Sort findings by documented priority. Return coverage and evidence in immutable scan records. The versioned JSON export references one copy of each hydrated advisory across all coordinate assessments. Input failures produce safe error codes. The job worker stores them on the affected scan.
 
-The query and detail caches are separately bounded and expire after five and fifteen minutes by default. Cached details must be at least as recent as the discovery timestamp. Incomplete discovery is never cached. If discovery succeeds and detail retrieval fails, the next scan can reuse the discovery IDs and retry hydration. The offline CLI has no database. [OSV querybatch](https://google.github.io/osv.dev/post-v1-querybatch/) · [OSV advisory endpoint](https://google.github.io/osv.dev/get-v1-vulns/) · [OSV schema](https://ossf.github.io/osv-schema/)
+The query and detail caches are separately bounded and expire after five and fifteen minutes by default. Cached details must be at least as recent as the discovery timestamp. Incomplete discovery is never cached. If discovery succeeds and detail retrieval fails, the next scan can reuse the discovery IDs and retry hydration. Offline CLI scans work without SQLite and use a catalog included in the wheel. [OSV querybatch](https://google.github.io/osv.dev/post-v1-querybatch/) · [OSV advisory endpoint](https://google.github.io/osv.dev/get-v1-vulns/) · [OSV schema](https://ossf.github.io/osv-schema/)
 
 ## Service lifecycle
 
@@ -63,9 +63,21 @@ The query and detail caches are separately bounded and expire after five and fif
 | `GET /api/scans` | Return paginated, newest-first scan summaries with stable ordering and provenance filtering. |
 | `GET /api/scans/{id}` | Return status, coverage, normalized dependencies, and scan metrics. Paginate large dependency lists. |
 | `GET /api/scans/{id}/findings` | Return filterable, paginated findings and detail evidence. |
+| `GET /api/scans/{id}/packages` and `/review` | Aggregate findings by exact coordinate and paginate unresolved inventory. |
+| `GET /api/scans/{id}/candidates` | Combine an advisory's applicable fix evidence with same-source exact-version lookup evidence from history. |
+| `GET /api/scans/{id}/comparison/{other_id}` | Compare immutable saved results by normalized package and explicit advisory identities. |
+| `GET /api/scans/{id}/report` | Read the saved scan and its evidence into a versioned report in one database read transaction. |
 | `GET /api/overview` | Return summaries computed from selected provenance and scan history, with partial and missing data represented explicitly. |
 | `GET /api/health` | Report local service and storage readiness without creating an OSV request. |
 
 Use consistent error objects with a stable code and a user-readable message. Enforce the byte limit as data arrives, even when `Content-Length` is absent or incorrect. Use `413` for oversized input, `415` for unsupported media, `422` for invalid request metadata, `429` for rate limits, and `503` when job admission is at capacity. Async parse or lookup failures become scan states with safe diagnostics. Provide generated OpenAPI documentation.
 
 One process owns the SQLite file through an OS lock, and one worker executes jobs. Shutdown cancels an active advisory lookup, waits for any storage operation already underway, and reconciles pending jobs. Startup reconciles abandoned jobs before admitting new work. The user can resubmit interrupted inputs. See the [API guide](api.md) for status, configuration, rate limits, and migrations.
+
+## Saved-result analysis
+
+Findings and dependency groups share SQL filters. A group represents an exact ecosystem, name, and version. The overview derives its affected-dependency ranking from those same groups. JSON exports and the printable HTML report use the same saved-result payload. Candidate evidence, comparisons, and reports use the existing schema and add no migration or outbound transport.
+
+The dashboard draws a risk history line only for repeated runs of the same bundled sample on the same scoring revision. Live history appears as independent points because uploads carry no persistent project identifier. The comparison screen lets the user choose a baseline and target and shows the coverage available for that specific pair.
+
+CLI history and report readers open SQLite read-only. CLI writes take the same exclusive worker lock as the API and migrations. Console comparisons call the same comparison logic as the API and can add a severity policy.

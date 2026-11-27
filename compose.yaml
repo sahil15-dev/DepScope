@@ -1,0 +1,27 @@
+services:
+  depscope:
+    build: .
+    init: true
+    user: '10001:10001'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - '127.0.0.1:${DEPSCOPE_PORT:-8000}:8000'
+    environment:
+      DEPSCOPE_DB_PATH: data/depscope.sqlite3
+      DEPSCOPE_ALLOWED_ORIGINS: 'http://127.0.0.1:${DEPSCOPE_PORT:-8000},http://localhost:${DEPSCOPE_PORT:-8000}'
+      DEPSCOPE_MAX_FILE_BYTES: ${DEPSCOPE_MAX_FILE_BYTES:-1000000}
+      DEPSCOPE_MAX_PENDING_JOBS: ${DEPSCOPE_MAX_PENDING_JOBS:-4}
+      DEPSCOPE_SUBMISSIONS_PER_MINUTE: ${DEPSCOPE_SUBMISSIONS_PER_MINUTE:-30}
+      DEPSCOPE_UPLOAD_TIMEOUT: ${DEPSCOPE_UPLOAD_TIMEOUT:-10}
+      DEPSCOPE_JOB_TIMEOUT: ${DEPSCOPE_JOB_TIMEOUT:-60}
+    volumes:
+      - scans:/app/data
+
+volumes:
+  scans:

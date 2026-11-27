@@ -22,9 +22,14 @@ def database_path(path: Path) -> Path:
     return resolved
 
 
-def sqlite_engine(path: Path) -> Engine:
+def sqlite_engine(path: Path, *, read_only: bool = False) -> Engine:
+    url = (
+        URL.create("sqlite+pysqlite", database=path.as_uri(), query={"mode": "ro", "uri": "true"})
+        if read_only
+        else URL.create("sqlite+pysqlite", database=str(path))
+    )
     engine = create_engine(
-        URL.create("sqlite+pysqlite", database=str(path)),
+        url,
         connect_args={"autocommit": False, "timeout": 1.5},
         hide_parameters=True,
     )

@@ -9,11 +9,20 @@ Run the API on loopback with one Uvicorn worker. API responses and the schema at
 | `POST /api/scans` | Accept manifest bytes or a bundled sample ID. Returns `202`, `Location`, and an object with `id`, `status`, and `status_url`. |
 | `GET /api/scans` | List scan summaries. Filter by `provenance`, `status`, or `format`. Sort by `newest`, `oldest`, or descending `risk` with unavailable scores last. |
 | `GET /api/scans/{id}` | Poll a scan and retrieve its coverage, error code, dependency occurrences, and coordinate assessments. `page` and `page_size` apply independently to both collections. |
-| `GET /api/scans/{id}/findings` | List findings and advisory evidence from that scan. Filter by `ecosystem`, `severity`, literal `package` substring, or `fix_available`. Sort by `priority` or `package`. |
-| `GET /api/overview` | Return counts by state, recent scans, latest complete or partial result, and risk trend points in chronological order. Default provenance is `live_osv`. Use `provenance=offline_fixture` for demos. `limit` defaults to 10 and accepts 1–50. |
+| `GET /api/scans/{id}/findings` | List findings and advisory evidence. Filter by `ecosystem`, `severity`, literal `package` substring, or `fix_available`. Optional `name` and `version` match normalized values exactly. Sort by `priority` or `package`. |
+| `GET /api/scans/{id}/packages` | Group matching findings by exact coordinate. Uses the ecosystem, severity, package search, and fix filters. Sort by `priority`, `package`, or `findings`. Counts and severity reflect the applied filters. |
+| `GET /api/scans/{id}/review` | List unresolved inventory entries with their stored reasons. Uses the same pagination as findings. |
+| `GET /api/scans/{id}/candidates` | Return advisory-specific fixed versions for a stored coordinate. Supply `ecosystem`, normalized `name`, and exact `version`. Includes evidence from the latest same-provenance saved lookup for each candidate, when present. |
+| `GET /api/scans/{id}/comparison/{other_id}` | Compare two saved results of the same provenance. The route ID is the baseline. Includes dependency changes, advisory equivalence, severity, coverage, and a risk delta when both scores use the same revision. |
+| `GET /api/scans/{id}/report` | Return the complete saved result as JSON with `schema_version: 1`. Use `download=true` for an attachment. Includes metadata, inventory, assessments, grouped findings, and advisory snapshots. |
+| `GET /api/overview` | Return counts by state, recent scans, the latest complete or partial result, and dated risk observations. Default provenance is `live_osv`. Use `provenance=offline_fixture` for demos. `limit` defaults to 10 and accepts 1–50. |
 | `GET /api/health` | Check SQLite schema readiness. Returns `200` when ready and `503` if storage becomes unavailable. Health performs no OSV lookups. |
 
 Paginated responses have `items`, `page`, `page_size`, and `total`. Page numbering starts at 1. The page size defaults to 20 and accepts 1–50. Scan IDs are UUIDs. Findings include the original priority and an observation list. The accompanying `advisories` map contains hydrated evidence for the page. Discovery-only entries still include their observed IDs and failure codes.
+
+Comparisons accept finished scans with saved coverage, including failures that recorded lookup results. A comparison across provenance or without two result snapshots returns `409`. Export of a pending scan returns `409`. Export of a failed scan preserves the available diagnostic and coverage. Unknown scan IDs return `404`. A no-longer-detected finding retains its lookup and version context so it can be reviewed before drawing conclusions.
+
+Candidate evidence is `known_findings` when the saved lookup includes findings, `no_known_findings` when an exact lookup completed with zero findings, and `insufficient_evidence` otherwise. The timestamp and linked scan identify the evidence used. Candidate checks and report reads make no OSV requests.
 
 ## Submit and seed scans from PowerShell
 
@@ -81,4 +90,4 @@ Copy-Item -LiteralPath $dbPath -Destination $backup
 & $python -m alembic upgrade head
 ```
 
-If startup reports a missing or incompatible schema, check the configured path and run `alembic upgrade head`. If another worker owns the database, stop that instance before starting the service or running migrations. If live OSV requests fail, inspect the scan's coordinate diagnostics and use a labeled offline sample to verify the local pipeline. The [test guide](testing.md) covers local verification without live requests.
+If startup reports a missing or incompatible schema, check the configured path and run `alembic upgrade head`. If another worker owns the database, stop that instance before starting the service or running migrations. If live OSV requests fail, inspect the coordinate diagnostics and use a labeled offline sample to verify the local pipeline. Live lookup requires a direct verified TLS connection. DepScope uses platform-trusted CA certificates and the bundled CA list and ignores ambient HTTP proxy variables. Check HTTPS connectivity and the platform trust configuration if the connection fails. [Verification guide](testing.md)

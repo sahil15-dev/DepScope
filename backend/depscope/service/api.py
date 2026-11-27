@@ -2,7 +2,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
@@ -16,12 +15,16 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
+from .. import __version__
 from ..demo import FixtureProvider
-from ..models import Provenance
+from ..identity import exact_version, package_name
+from ..models import Coordinate, Occurrence, Provenance
 from ..osv import OSVClient
 from ..parsers import ParseLimits
 from ..scanner import AdvisoryProvider, Scanner
 from ..settings import Settings
+from ..storage.analysis_views import CandidateUpgrade, PackagePage, ScanComparison, ScanReport
+from ..storage.comparison import compare_reports
 from ..storage.database import database_path, database_ready, sqlite_engine, worker_lock
 from ..storage.models import ScanSource, ScanStatus
 from ..storage.repository import ScanInput, ScanRepository
@@ -29,9 +32,11 @@ from ..storage.views import FindingsPage, Overview, Page, ScanDetail, ScanSummar
 from .errors import ErrorResponse, ServiceError, database_unavailable, scan_not_found
 from .jobs import ScanJobs
 from .requests import (
+    CoordinateQuery,
     FindingsQuery,
     HistoryQuery,
     OverviewQuery,
+    PackageQuery,
     PageQuery,
     Submission,
     check_media,
@@ -83,12 +88,7 @@ def create_app(
                 repository = ScanRepository(engine)
                 await run_in_threadpool(repository.reconcile)
                 limits = ParseLimits(max_file_bytes=options.max_file_bytes)
-                fixture = Path("samples/osv.json").resolve()
-                if not fixture.is_relative_to(Path.cwd().resolve()):
-                    raise RuntimeError(
-                        "The fixture catalog must be inside the application workspace"
-                    )
-                demo = FixtureProvider(fixture)
+                demo = FixtureProvider.bundled()
                 async with AsyncExitStack() as stack:
                     provider: AdvisoryProvider = (
                         live_provider
@@ -117,7 +117,7 @@ def create_app(
 
     app = FastAPI(
         title="DepScope",
-        version="0.2.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -241,9 +241,96 @@ def create_app(
             package=query.package,
             fix_available=query.fix_available,
             sort=query.sort,
+            name=query.name,
+            version=query.version,
         )
         if result is None:
             raise scan_not_found()
+        return result
+
+    @app.get("/api/scans/{scan_id}/packages")
+    def packages(
+        request: Request, scan_id: UUID, query: Annotated[PackageQuery, Query()]
+    ) -> PackagePage:
+        result = _services(request).repository.groups(
+            str(scan_id),
+            query.pagination,
+            ecosystem=query.ecosystem,
+            severity=query.severity,
+            package=query.package,
+            fix_available=query.fix_available,
+            sort=query.sort,
+        )
+        if result is None:
+            raise scan_not_found()
+        return result
+
+    @app.get("/api/scans/{scan_id}/review")
+    def review(
+        request: Request, scan_id: UUID, query: Annotated[PageQuery, Query()]
+    ) -> Page[Occurrence]:
+        result = _services(request).repository.review(str(scan_id), query.pagination)
+        if result is None:
+            raise scan_not_found()
+        return result
+
+    @app.get("/api/scans/{scan_id}/candidates")
+    def candidates(
+        request: Request, scan_id: UUID, query: Annotated[CoordinateQuery, Query()]
+    ) -> list[CandidateUpgrade]:
+        name = package_name(query.ecosystem, query.name)
+        version = exact_version(query.ecosystem, query.version)
+        if not name or not version:
+            raise ServiceError(422, "invalid_coordinate", "Choose an exact package version.")
+        result = _services(request).repository.candidates(
+            str(scan_id), Coordinate(query.ecosystem, name, version)
+        )
+        if result is None:
+            raise scan_not_found()
+        return result
+
+    @app.get("/api/scans/{scan_id}/comparison/{other_id}")
+    def comparison(request: Request, scan_id: UUID, other_id: UUID) -> ScanComparison:
+        if scan_id == other_id:
+            raise ServiceError(422, "same_scan", "Choose two different saved scans.")
+        repository = _services(request).repository
+        baseline = repository.report(str(scan_id), include_evidence=False)
+        target = repository.report(str(other_id), include_evidence=False)
+        if baseline is None or target is None:
+            raise scan_not_found()
+        if baseline.scan.provenance != target.scan.provenance:
+            raise ServiceError(
+                409, "different_sources", "Compare two fixture scans or two live scans."
+            )
+        if any(
+            item.scan.status in (ScanStatus.QUEUED, ScanStatus.RUNNING)
+            for item in (baseline, target)
+        ):
+            raise ServiceError(
+                409, "scan_pending", "Wait until both scans finish before comparing."
+            )
+        if baseline.scan.coverage is None or target.scan.coverage is None:
+            raise ServiceError(
+                409, "scan_result_unavailable", "Choose two scans with saved dependency results."
+            )
+        return compare_reports(baseline, target)
+
+    @app.get("/api/scans/{scan_id}/report")
+    def report(
+        request: Request, response: Response, scan_id: UUID, download: bool = False
+    ) -> ScanReport:
+        result = _services(request).repository.report(str(scan_id))
+        if result is None:
+            raise scan_not_found()
+        if result.scan.status in (ScanStatus.QUEUED, ScanStatus.RUNNING):
+            raise ServiceError(
+                409, "scan_pending", "Wait until the scan finishes before exporting."
+            )
+        response.headers["Cache-Control"] = "no-store"
+        if download:
+            response.headers["Content-Disposition"] = (
+                f'attachment; filename="depscope-{scan_id}.json"'
+            )
         return result
 
     @app.get("/api/overview")

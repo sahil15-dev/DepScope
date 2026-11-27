@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 
 from ..models import Ecosystem, ManifestFormat, Provenance, Severity
+from ..storage.analysis_views import GroupSort
 from ..storage.models import ScanSource, ScanStatus
 from ..storage.repository import Pagination
 from ..storage.views import FindingSort, ScanSort
@@ -40,12 +41,29 @@ class HistoryQuery(PageQuery):
     sort: ScanSort = ScanSort.NEWEST
 
 
-class FindingsQuery(PageQuery):
+class FindingFilters(PageQuery):
     ecosystem: Ecosystem | None = None
     severity: Severity | None = None
     package: Annotated[str | None, Field(min_length=1, max_length=214)] = None
     fix_available: bool | None = None
+
+
+class FindingsQuery(FindingFilters):
     sort: FindingSort = FindingSort.PRIORITY
+    name: Annotated[str | None, Field(min_length=1, max_length=214)] = None
+    version: Annotated[str | None, Field(min_length=1, max_length=128)] = None
+
+
+class PackageQuery(FindingFilters):
+    sort: GroupSort = GroupSort.PRIORITY
+
+
+class CoordinateQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ecosystem: Ecosystem
+    name: Annotated[str, Field(min_length=1, max_length=214)]
+    version: Annotated[str, Field(min_length=1, max_length=128)]
 
 
 class OverviewQuery(BaseModel):

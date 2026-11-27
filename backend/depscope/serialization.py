@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
 
@@ -11,7 +12,7 @@ def _encode(value: object) -> str:
     raise TypeError(f"Unsupported result type: {type(value).__name__}")
 
 
-def to_json(result: ScanResult) -> str:
+def to_json(result: ScanResult, *, metadata: Mapping[str, str | int | None] | None = None) -> str:
     advisories: dict[str, object] = {}
     assessments: list[dict[str, object]] = []
     for assessment in result.assessments:
@@ -47,6 +48,7 @@ def to_json(result: ScanResult) -> str:
         "findings": [asdict(item) for item in result.findings],
         "risk": asdict(result.risk),
         "limitations": result.limitations,
+        **(metadata or {}),
     }
     return (
         json.dumps(document, indent=2, allow_nan=False, ensure_ascii=True, default=_encode) + "\n"

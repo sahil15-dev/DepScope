@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install locked wheels in a virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements/dev.txt -r requirements/build.txt
+          .venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+          .venv/bin/python -m pip check
+      - name: Check backend
+        run: |
+          source .venv/bin/activate
+          ruff check backend migrations e2e
+          ruff format --check backend migrations e2e
+          mypy
+          mkdir -p artifacts
+          pytest --basetemp artifacts/pytest-ci --cov=depscope --cov-report=term-missing
+          DEPSCOPE_DB_PATH=artifacts/schema-ci.sqlite3 alembic upgrade head
+          DEPSCOPE_DB_PATH=artifacts/schema-ci.sqlite3 alembic check
+      - name: Build sdist and wheel and verify an installed CLI
+        run: |
+          source .venv/bin/activate
+          python -m build --no-isolation --outdir artifacts/dist
+          python -m pip wheel --no-deps --no-build-isolation --wheel-dir artifacts/from-sdist artifacts/dist/*.tar.gz
+          python -m venv artifacts/installed
+          artifacts/installed/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements/runtime.txt
+          artifacts/installed/bin/python -m pip install --no-deps artifacts/from-sdist/*.whl
+          artifacts/installed/bin/python -m pip check
+          cd artifacts/installed
+          bin/depscope --version
+          bin/depscope scan ../../samples/requirements-vulnerable.txt --offline --fail-on high --format json
+          rc=0
+          bin/depscope scan ../../samples/requirements-partial.txt --offline --fail-on high || rc=$?
+          test "$rc" -eq 3
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.22.0'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    env:
+      DEPSCOPE_E2E_BUNDLED: '1'
+      DEPSCOPE_E2E_BROWSERS: ${{ matrix.engine }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/artifacts/browsers
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.22.0'
+          package-manager-cache: false
+      - name: Install the backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements/build.txt
+          .venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+      - name: Build the dashboard and provision the browser
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          node node_modules/playwright/cli.js install --with-deps "$DEPSCOPE_E2E_BROWSERS"
+      - name: Run the offline browser checks
+        run: node frontend/e2e/smoke.mjs

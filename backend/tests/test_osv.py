@@ -1,10 +1,12 @@
 import asyncio
 import json
+import ssl
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -15,6 +17,22 @@ from depscope.osv import OSVClient, OSVConfig
 from .helpers import ALPHA, BETA, MODIFIED, advisory
 
 CONFIG = OSVConfig(request_interval=0, retry_base=0, max_retry_after=0)
+
+
+def test_live_transport_uses_verified_tls_without_proxy_or_redirects() -> None:
+    async def run() -> None:
+        with patch.object(httpx, "AsyncClient", wraps=httpx.AsyncClient) as client:
+            async with OSVClient():
+                pass
+            options = client.call_args.kwargs
+        context = options["verify"]
+        assert isinstance(context, ssl.SSLContext)
+        assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+        assert context.cert_store_stats()["x509_ca"] > 0
+        assert options["base_url"] == "https://api.osv.dev"
+        assert options["trust_env"] is False and options["follow_redirects"] is False
+
+    asyncio.run(run())
 
 
 def test_batch_correlation_per_query_pagination_and_shared_detail_cache() -> None:

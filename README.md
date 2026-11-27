@@ -1,92 +1,111 @@
 # DepScope
 
-DepScope is a local-first dependency security project. It assesses exact Python requirements pins and npm lockfile entries against known advisories, explains coverage and fix evidence, and stores scan history in SQLite.
+DepScope is a local dependency advisory scanner for Python requirements and npm lockfiles. The dashboard and CLI show which versions were assessed, what the advisory evidence supports, and where coverage is incomplete.
 
-**Project status** · Phase 2 scanning engine, local REST API, and persistent scan history. The browser application is planned for Phase 3.
+![DepScope dashboard showing severity, lookup coverage, and history for labeled offline samples](docs/images/overview.png)
 
-## Windows setup
+[Grouped findings](docs/images/scan-results.png) · [Remediation center](docs/images/remediation.png) · [Scan comparison](docs/images/scan-comparison.png)
 
-From the workspace root, use Python 3.12. Installation downloads the service and development dependencies from PyPI into `.venv`.
+## Purpose
 
-```powershell
-python --version
-python -I -m venv --without-pip .venv
-New-Item -ItemType Directory -Path .\.venv\tmp -Force | Out-Null
-$env:TMP = (Resolve-Path .\.venv\tmp).Path
-$env:TEMP = $env:TMP
-$env:PIP_CONFIG_FILE = 'NUL'
-$python = '.\.venv\Scripts\python.exe'
-& $python -I -m ensurepip --default-pip
-& $python -I -m pip --isolated --disable-pip-version-check --no-cache-dir install --index-url https://pypi.org/simple --only-binary=:all: --timeout 12 --retries 1 -e '.[dev]'
-```
+A manifest can mix exact versions, ranges, and unsupported sources. An empty finding list has different meaning when every version was checked and when some versions could not be assessed. DepScope records that difference alongside each result so a reviewer can judge the evidence before acting on it.
 
-## Initialize the database and start the API
+## Features
 
-Run from the workspace root after installation. Alembic creates the database directory and applies the current schema. The service binds to IPv4 loopback and runs one worker.
+- Assess exact Python `==` pins and npm lockfile v1–3 entries, including nested npm packages. Keep unresolved declarations visible.
+- Run bundled offline examples or opt in to live lookups from the [Open Source Vulnerabilities database](https://osv.dev/).
+- Group findings by advisory or package version and trace severity, aliases, and applicable fix evidence.
+- Review remediation candidates, compare saved scans from the same source, and export JSON or a printable report.
+- Apply a severity threshold using the CLI, including a comparison against a saved baseline. Incomplete evidence produces a nonzero policy result.
 
-```powershell
-$python = '.\.venv\Scripts\python.exe'
-& $python -m alembic upgrade head
-& $python -m alembic current
-& $python -m uvicorn depscope.service.api:create_app --factory --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
-```
+## Stack and layout
 
-In another PowerShell terminal, submit an offline sample and check its scan record.
+The backend uses Python, FastAPI, SQLAlchemy, Alembic, and SQLite. The dashboard uses React, TypeScript, and Vite. Pytest, Vitest, and Playwright cover the engine, UI, and complete workflows.
 
-```powershell
-$api = 'http://127.0.0.1:8000'
-Invoke-RestMethod "$api/api/health"
-$scan = Invoke-RestMethod -Method Post -Uri "$api/api/scans?sample_id=python-vulnerable"
-Invoke-RestMethod "$api$($scan.status_url)"
-Invoke-RestMethod "$api$($scan.status_url)/findings"
-Invoke-RestMethod "$api/api/scans?provenance=offline_fixture"
-```
+~~~text
+backend/depscope/   scanner, CLI, API, and persistence
+backend/tests/      scanner, API, storage, and CLI tests
+frontend/src/      dashboard and report views
+frontend/tests/    component and interaction tests
+frontend/e2e/      browser checks backed by the offline service in e2e/
+migrations/        SQLite schema migrations
+requirements/      hash-pinned Python dependencies
+samples/           public and synthetic scan inputs
+docs/              design, verification, and deployment notes
+~~~
 
-A new record starts at `queued` and can be polled until `complete`, `partial`, or `failed`. See the [API guide](docs/api.md) for request formats, offline database seeding, limits, errors, and upgrade procedures. The machine-readable OpenAPI schema is available at `/openapi.json`.
+## How a scan works
 
-## Run the scanner directly
-
-Scan the bundled examples offline and export one result to a new JSON file.
-
-```powershell
-$python = '.\.venv\Scripts\python.exe'
-New-Item -ItemType Directory -Path .\artifacts -Force | Out-Null
-$jsonReport = '.\artifacts\python-demo-' + [guid]::NewGuid().ToString('N') + '.json'
-& $python -m depscope .\samples\requirements-vulnerable.txt --offline --json $jsonReport
-& $python -m depscope .\samples\package-lock-vulnerable.json --offline
-& $python -m depscope .\samples\requirements-clean.txt --offline
-Get-Content -LiteralPath $jsonReport -Raw | ConvertFrom-Json
-```
-
-The fixture results are deliberately limited. Coordinates outside the fixture set are marked unassessed. Use `--format requirements` or `--format npm-lock` for files with other names. An explicitly requested `--live` scan sends exact package coordinates to `api.osv.dev`. The temporary interface exits with `0` for complete lookups, `1` for partial or failed lookups, and `2` for an input or export error. A completed scan can still contain unresolved entries.
-
-See the [fixture sources](samples/README.md) and [verification commands](docs/testing.md).
-
-## Coverage
-
-Python requirements describe what is declared in that file. An npm lockfile can also describe locked transitive dependencies. The service reports exact, assessed, partial, failed, and unresolved entries. Live lookups send exact dependency coordinates to OSV when requested. Offline samples use a bundled subset of advisories and have separate provenance.
-
-## Architecture
-
-```mermaid
+~~~mermaid
 flowchart LR
-    Client[Local client] --> API[FastAPI]
-    API --> Queue[Bounded job queue]
-    Queue --> Engine[Dependency scanner]
-    Engine --> OSV[OSV or offline fixtures]
-    Engine --> DB[(SQLite scan history)]
-    API --> DB
-```
+    Dashboard[React dashboard] --> API[FastAPI]
+    API --> Jobs[Bounded scan queue]
+    CLI[DepScope CLI] --> Scanner[Scanner]
+    Jobs --> Scanner
+    Scanner --> Provider[OSV or bundled fixtures]
+    Scanner --> Evidence[Findings and coverage]
+    Evidence -->|Saved by API job or CLI| DB[(SQLite scan history)]
+    API -->|Read saved results| DB
+    CLI -->|Read history| DB
+~~~
 
-The service uses Python 3.12, FastAPI, Pydantic, HTTPX, SQLAlchemy, SQLite, and Alembic. It parses manifests as data, keeps raw bytes in memory, and stores normalized results and advisory snapshots. See the [threat model](docs/threat-model.md) and [current limitations](docs/limitations.md).
+Both entry points use the same parser and matching engine. The scanner preserves the affected range and advisory ID behind each suggested fix. CVSS comes from advisory evidence, and the separate DepScope index summarizes weighted severity for triage. Saved results include normalized dependencies, evidence, and coverage. Raw manifest contents stay out of SQLite. [Architecture](docs/architecture.md) · [Data model](docs/data-model.md) · [Scoring](docs/scoring.md)
 
-## Design documents
+## Quickstart
 
-- [Architecture and scan flow](docs/architecture.md)
-- [SQLite schema](docs/data-model.md)
-- [Risk prioritization and scoring](docs/scoring.md)
-- [Threat model](docs/threat-model.md)
+Use CPython 3.12–3.14 and Node.js 22.22 or a compatible newer release. The commands use the checked-in Python and npm locks. [macOS, Linux, and Docker setup](docs/deployment.md)
 
-## Roadmap
+### Windows setup
 
-Phase 3 adds the responsive dashboard, scan workflow, history, and vulnerability explorer. Scan comparison and reports follow in Phase 4. CLI integration, Docker, and browser tests are planned for Phase 5.
+Run these commands from the repository root in PowerShell. The last command starts the local API.
+
+~~~powershell
+python -m venv .venv
+$python = '.\.venv\Scripts\python.exe'
+& $python -m pip install --require-hashes --only-binary=:all: -r requirements/build.txt -r requirements/dev.txt
+& $python -m pip install --no-deps --no-build-isolation -e .
+& $python -m alembic upgrade head
+$env:DEPSCOPE_ALLOWED_ORIGINS = 'http://127.0.0.1:5173,http://127.0.0.1:4173'
+& $python -m uvicorn depscope.service.api:create_app --factory --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers --no-access-log
+~~~
+
+### Start the dashboard
+
+Open a second PowerShell terminal at the repository root.
+
+~~~powershell
+Set-Location .\frontend
+npm.cmd ci --ignore-scripts --cache ..\artifacts\npm-cache --no-audit --no-fund
+npm.cmd run dev
+~~~
+
+Open `http://127.0.0.1:5173`. Choose **New scan → Offline sample → Python advisory**. Open the finding to see the exact version, advisory identifiers, and evidence for the fix. Run **Partial advisory data** to see how the app reports incomplete lookups.
+
+## Scan from the CLI
+
+Run this from the repository root. The CLI can scan without the server or dashboard.
+
+~~~powershell
+& .\.venv\Scripts\depscope.exe scan .\samples\requirements-vulnerable.txt --offline --format json
+~~~
+
+The bundled sample is intentionally vulnerable and is for scanning only. Do not install its dependencies. Use `--live` to send exact package names, ecosystems, and versions to OSV. [Sample inputs](samples/README.md) · [CLI and exit codes](docs/cli.md) · [CI policy example](docs/ci-policy.md)
+
+## Tests
+
+After the quickstart dependency installation, run from the repository root in PowerShell.
+
+~~~powershell
+New-Item -Path .\artifacts -ItemType Directory -Force | Out-Null
+$testRun = '.\artifacts\pytest-' + [guid]::NewGuid().ToString('N')
+& .\.venv\Scripts\python.exe -m pytest --basetemp $testRun --cov=depscope
+npm.cmd --prefix .\frontend test
+~~~
+
+The standard tests use offline fixtures or mocks. See the [testing guide](docs/testing.md) for lint, type, packaging, and browser commands and the [verification record](docs/testing.md#phase-6-verification) for measured results.
+
+## Limitations and roadmap
+
+Python requirements describe declared pins. DepScope does not resolve an environment or determine runtime reachability. A recorded fixed version applies to the advisory evidence for that package version. Upgrade compatibility still needs application testing.
+
+The API binds to loopback and is designed for a single local user. Future work can extend manifest coverage and compare advisories across more dependency formats. The project license and first hosted CI run remain pending. [Known limitations](docs/limitations.md) · [Security policy](SECURITY.md) · [Third-party notices](docs/third-party.md) · [Changelog](CHANGELOG.md)
